@@ -1,15 +1,19 @@
 using DrWatson, Test
 @quickactivate "GyrotronMagnet"
 
-# Here you include files using `srcdir`
-# include(srcdir("file.jl"))
+# Include test files
+include("geometry.jl")
+include("fem_solver.jl")
+include("utils.jl")
 
 # Run test suite
 println("Starting tests")
 ti = time()
 
 @testset "GyrotronMagnet tests" begin
-    @test 1 == 1
+    # All tests are in individual test files
+    # This testset serves as a container
+    @test true
 end
 
 ti = time() - ti

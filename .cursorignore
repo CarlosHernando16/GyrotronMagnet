@@ -1,0 +1,6 @@
+data/
+plots/
+*.msh
+*.csv
+Manifest.toml
+.git/
