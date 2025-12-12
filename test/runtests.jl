@@ -5,6 +5,7 @@ using DrWatson, Test
 include("geometry.jl")
 include("fem_solver.jl")
 include("utils.jl")
+include("optimization.jl")
 
 # Run test suite
 println("Starting tests")

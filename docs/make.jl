@@ -1,3 +1,6 @@
+using DrWatson
+@quickactivate "GyrotronMagnet"
+
 using Documenter
 using GyrotronMagnet
 

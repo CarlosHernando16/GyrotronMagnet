@@ -23,9 +23,10 @@ struct MagnetostaticModel
 end
 
 """
-    solve_magnetostatic(model::DiscreteModel, J_φ::CellField, 
-                       μ₀::Float64=4π*1e-7; order::Int=1, bc_type="dirichlet", 
-                       boundary_tag="outer_boundary")
+    solve_magnetostatic(model::DiscreteModel, J_φ::CellField;
+                       μ₀::Float64=4π*1e-7, order::Int=1, bc_type="dirichlet",
+                       boundary_tag="outer_boundary", symmetry_z0::Bool=false,
+                       coil_geometries::Vector=[], mu_r_air::Float64=1.0, mu_r_coil::Float64=1.0)
 
 Solve the 2D axisymmetric magnetostatic problem using scalar potential A_φ.
 
@@ -42,28 +43,40 @@ which reduces to the scalar equation:
 - `order::Int`: FE polynomial order (default 1)
 - `bc_type::String`: Boundary condition type (default `"dirichlet"`)
 - `boundary_tag::String`: Tag name for boundary conditions (default `"outer_boundary"`)
+- `symmetry_z0::Bool`: If true, apply Neumann BC at z=0 (symmetry plane) and Dirichlet at outer boundaries
+- `coil_geometries::Vector`: Vector of `CoilGeometry` for region-aware material properties
+- `mu_r_air::Float64`: Relative permeability of air region (default 1.0)
+- `mu_r_coil::Float64`: Relative permeability of coil region (default 1.0)
 
 # Returns
 - `MagnetostaticModel`: Model containing solution A_φ and computed B fields
 
 # Mathematical Formulation
 The weak form for axisymmetric 2D is:
-∫_Ω (1/μ) * (r * ∇u · ∇v + (u*v)/r) dΩ = ∫_Ω J_φ * v * r dΩ, ∀v ∈ V₀
+∫_Ω (ν(x)) * (r * ∇u · ∇v + (u*v)/r) dΩ = ∫_Ω J_φ * v * r dΩ, ∀v ∈ V₀
 
 where:
 - u = A_φ (azimuthal component of vector potential)
 - r is the radial coordinate
+- ν(x) = 1/(μ₀ * μᵣ(x)) is the reluctivity (spatially varying if materials differ)
 - B_r = -∂A_φ/∂z
 - B_z = (1/r)∂(r*A_φ)/∂r
+
+# Symmetry Mode
+- r = 0 (axis): Always Dirichlet (A_φ = 0) for axisymmetric regularity.
+- Outer boundaries (r_max, z_min, z_max): Dirichlet (A_φ = 0).
+- When `symmetry_z0=true`, we solve only z ≥ 0; z=0 uses Neumann (∂A/∂n = 0) to enforce
+  midplane symmetry, while keeping r=0 Dirichlet.
 
 # Notes
 - Domain is in r-z plane (axisymmetric)
 - Only A_φ component is non-zero
 - Magnetic field components: B_r (radial) and B_z (axial)
 """
-function solve_magnetostatic(model::DiscreteModel, J_φ::CellField,
-                             μ₀::Float64=4π*1e-7; order::Int=1, bc_type="dirichlet",
-                             boundary_tag="outer_boundary")
+function solve_magnetostatic(model::DiscreteModel, J_φ::CellField;
+                             μ₀::Float64=4π*1e-7, order::Int=1, bc_type="dirichlet",
+                             boundary_tag="outer_boundary", symmetry_z0::Bool=false,
+                             coil_geometries::Vector=[], mu_r_air::Float64=1.0, mu_r_coil::Float64=1.0)
     
     # Get domain triangulation
     Ω = Triangulation(model)
@@ -71,20 +84,35 @@ function solve_magnetostatic(model::DiscreteModel, J_φ::CellField,
     # Define FE space for scalar potential A_φ
     reffe = ReferenceFE(lagrangian, Float64, order)
     
+    # Get face labeling for boundary conditions
+    labels = get_face_labeling(model)
+    tag_names = collect(keys(labels.tag_to_entities))
+    
     # Apply boundary conditions
     if bc_type == "dirichlet"
-        # Homogeneous Dirichlet BC: A_φ = 0 on boundaries
-        # Try to use specified boundary tag, fallback to all boundaries if tag doesn't exist
-        try
-            V = TestFESpace(model, reffe, conformity=:H1, dirichlet_tags=boundary_tag)
-            U = TrialFESpace(V, 0.0)
-        catch
-            @warn "Boundary tag $(boundary_tag) not found; applying homogeneous BC on all boundaries."
-            V = TestFESpace(model, reffe, conformity=:H1)
-            U = TrialFESpace(V, 0.0)
+        if symmetry_z0
+            # Half-domain symmetry: Dirichlet on r=0, r_max, z_max; Neumann on z=0
+            if boundary_tag in tag_names
+                V = TestFESpace(model, reffe, conformity=:H1, dirichlet_tags=boundary_tag)
+                U = TrialFESpace(V, 0.0)
+            else
+                V = TestFESpace(model, reffe, conformity=:H1,
+                    dirichlet_masks=[(true, true, false, true)])  # (r_min, r_max, z_min, z_max)
+                U = TrialFESpace(V, 0.0)
+            end
+        else
+            # Standard full-domain: Dirichlet on all boundaries (including axis)
+            if boundary_tag in tag_names
+                V = TestFESpace(model, reffe, conformity=:H1, dirichlet_tags=boundary_tag)
+                U = TrialFESpace(V, 0.0)
+            else
+                V = TestFESpace(model, reffe, conformity=:H1,
+                    dirichlet_masks=[(true, true, true, true)])  # (r_min, r_max, z_min, z_max)
+                U = TrialFESpace(V, 0.0)
+            end
         end
     else
-        # No boundary conditions (Neumann)
+        # Pure Neumann (no Dirichlet constraints)
         V = TestFESpace(model, reffe, conformity=:H1)
         U = TrialFESpace(V)
     end
@@ -92,15 +120,37 @@ function solve_magnetostatic(model::DiscreteModel, J_φ::CellField,
     # Define measure with appropriate quadrature order
     dΩ = Measure(Ω, 2*order)
     
-    # Weak form for axisymmetric 2D magnetostatics
-    # ∫ (1/μ₀) * (r * ∇u · ∇v + (u*v)/r) dΩ = ∫ J_φ * v * r dΩ
+    # Build spatially-varying reluctivity ν(x) = 1/(μ₀ * μᵣ(x))
+    # If mu_r_air == mu_r_coil, use uniform reluctivity for efficiency
+    if isempty(coil_geometries) || mu_r_air == mu_r_coil
+        # Uniform material properties
+        ν = 1.0 / (μ₀ * mu_r_air)
+        ν_field = CellField(x -> ν, Ω)
+    else
+        # Spatially varying: check if point is inside any coil
+        function compute_nu(x)
+            r, z = x[1], x[2]
+            for coil in coil_geometries
+                z_low = coil.z - coil.z_length / 2
+                z_high = coil.z + coil.z_length / 2
+                if (coil.r_inner <= r <= coil.r_outer) && (z_low <= z <= z_high)
+                    return 1.0 / (μ₀ * mu_r_coil)
+                end
+            end
+            return 1.0 / (μ₀ * mu_r_air)
+        end
+        ν_field = CellField(compute_nu, Ω)
+    end
+    
+    # Weak form for axisymmetric 2D magnetostatics with variable reluctivity
+    # ∫ ν(x) * (r * ∇u · ∇v + (u*v)/r) dΩ = ∫ J_φ * v * r dΩ
     function a(u, v)
-        r_coord = CellField(x -> x[1], Ω)  # Radial coordinate r
-        return ∫((1/μ₀) * (r_coord * (∇(u) ⋅ ∇(v)) + (u*v)/r_coord))dΩ
+        r_coord = CellField(x -> x[1], Ω)
+        return ∫(ν_field * (r_coord * (∇(u) ⋅ ∇(v)) + (u*v)/r_coord))dΩ
     end
     
     function l(v)
-        r_coord = CellField(x -> x[1], Ω)  # Radial coordinate r
+        r_coord = CellField(x -> x[1], Ω)
         return ∫(J_φ * v * r_coord)dΩ
     end
     
@@ -112,7 +162,6 @@ function solve_magnetostatic(model::DiscreteModel, J_φ::CellField,
     # B_r = -∂A_φ/∂z
     # B_z = (1/r)∂(r*A_φ)/∂r = ∂A_φ/∂r + A_φ/r
     dA_φ = ∇(A_φ_sol)
-    r_coord = CellField(x -> x[1], Ω)
     
     # B_r = -∂A_φ/∂z (negative of z-component of gradient)
     B_r_field = CellField(x -> -dA_φ(x)[2], Ω)
@@ -133,6 +182,11 @@ function solve_magnetostatic(model::DiscreteModel, J_φ::CellField,
     
     # Create and return model structure
     return MagnetostaticModel(model, Ω, V, A_φ_sol, B_mag_field, B_r_field, B_z_field)
+end
+
+# Backward-compatible method without keyword arguments for μ₀
+function solve_magnetostatic(model::DiscreteModel, J_φ::CellField, μ₀::Float64; kwargs...)
+    return solve_magnetostatic(model, J_φ; μ₀=μ₀, kwargs...)
 end
 
 """

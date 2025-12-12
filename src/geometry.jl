@@ -1,50 +1,76 @@
 """
-    CoilParameters
+    CoilGeometry
 
-Structure storing coil configuration parameters for axisymmetric 2D problems.
+Geometry and source term parameters for a single axisymmetric coil.
 
 # Fields
 - `r::Float64`: Radial position of coil center (meters)
 - `z::Float64`: Axial position of coil center (meters)
-- `I::Float64`: Current in coil (amps)
-- `n_turns::Int`: Number of turns
-- `r_inner::Float64`: Inner radius of coil in meters. These radii are absolute distances from the axis.
-- `r_outer::Float64`: Outer radius of coil in meters (also absolute).
+- `r_inner::Float64`: Inner radius of coil in meters (absolute distance from axis)
+- `r_outer::Float64`: Outer radius of coil in meters (absolute distance from axis)
 - `z_length::Float64`: Axial length of the coil (meters)
-
-# Notes
-- The coil occupies the region `r_inner ≤ r ≤ r_outer` and `z - z_length/2 ≤ z ≤ z + z_length/2`.
-- Current density is computed as `J_φ = n_turns * I / (cross-section area)`.
+- `current_density::Float64`: Azimuthal current density J_φ in A/m² (FEM source term)
 """
-struct CoilParameters
-    r::Float64      # Radial position of coil center
-    z::Float64      # Axial position of coil center
-    I::Float64      # Current (amps)
-    n_turns::Int    # Number of turns
+struct CoilGeometry
+    r::Float64
+    z::Float64
     r_inner::Float64
     r_outer::Float64
     z_length::Float64
+    current_density::Float64
 end
 
 """
-    create_coil_geometry(r, z, I, n_turns; r_inner=0.01, r_outer=0.02, z_length=0.01)
+    ConductorParameters
 
-Create a coil geometry with specified parameters.
+Engineering properties of the conductor used to wind a coil.
+
+# Fields
+- `wire_cross_section::Float64`: Wire cross-sectional area (m²)
+- `material::String`: Conductor material name
+- `winding_factor::Float64`: Packing efficiency (0-1), accounts for voids/insulation
+- `insulation_thickness::Float64`: Electrical insulation thickness (m)
+"""
+struct ConductorParameters
+    wire_cross_section::Float64
+    material::String
+    winding_factor::Float64
+    insulation_thickness::Float64
+    function ConductorParameters(wire_cross_section::Real,
+                                 material::AbstractString;
+                                 winding_factor::Real = 0.7,
+                                 insulation_thickness::Real = 0.0)
+        wc = float(wire_cross_section)
+        wf = float(winding_factor)
+        it = float(insulation_thickness)
+        wc > 0 || error("wire_cross_section must be positive.")
+        (0 < wf <= 1) || error("winding_factor must be in (0, 1].")
+        it >= 0 || error("insulation_thickness must be non-negative.")
+        return new(wc, String(material), wf, it)
+    end
+end
+
+"""
+    create_coil_geometry(; r, z, current_density, r_inner=0.01, r_outer=0.02, z_length=0.01)
+
+Create a coil geometry with specified parameters using current density as the source term.
+All arguments are keywords for consistency.
 
 # Arguments
-- `r::Float64`: Radial position of coil center in meters
-- `z::Float64`: Axial position of coil center in meters
-- `I::Float64`: Current in amps
-- `n_turns::Int`: Number of turns
-- `r_inner::Float64`: Inner radius in meters (default 0.01 m)
-- `r_outer::Float64`: Outer radius in meters (default 0.02 m)
-- `z_length::Float64`: Axial length in meters (default 0.01 m)
+- `r::Real`: Radial position of coil center in meters
+- `z::Real`: Axial position of coil center in meters
+- `current_density::Real`: Azimuthal current density J_φ in A/m²
+- `r_inner::Real`: Inner radius in meters (default 0.01 m)
+- `r_outer::Real`: Outer radius in meters (default 0.02 m)
+- `z_length::Real`: Axial length in meters (default 0.01 m)
 
 # Returns
-- `CoilParameters`: Coil configuration structure
+- `CoilGeometry`: Coil configuration structure
 """
-function create_coil_geometry(r=0.1, z=0.5, I=1000.0, n_turns=100; r_inner=0.01, r_outer=0.02, z_length=0.01)
-    return CoilParameters(r, z, I, n_turns, r_inner, r_outer, z_length)
+function create_coil_geometry(; r::Real, z::Real, current_density::Real,
+                               r_inner::Real=0.01, r_outer::Real=0.02, z_length::Real=0.01)
+    return CoilGeometry(float(r), float(z), float(r_inner), float(r_outer),
+                        float(z_length), float(current_density))
 end
 
 """
@@ -157,24 +183,24 @@ function load_mesh(msh_file::String)
 end
 
 """
-    create_current_density(coil_params::Vector{CoilParameters}, model::DiscreteModel)
+    create_current_density(coil_geometries::Vector{CoilGeometry}, model::DiscreteModel)
 
 Create azimuthal current density field J_φ from coil parameters for 2D axisymmetric problems.
 
 # Arguments
-- `coil_params::Vector{CoilParameters}`: Vector of coil configurations
+- `coil_geometries::Vector{CoilGeometry}`: Vector of coil configurations
 - `model::DiscreteModel`: Gridap discrete model (2D r-z plane)
 
 # Returns
 - `J_φ::CellField`: Azimuthal current density (scalar field) in A/m²
 
 # Notes
-- For axisymmetric 2D, only J_φ (azimuthal) component exists
-- Current density is computed as: J_φ = n_turns * I / (coil cross-section area)
-- The area is: π * (r_outer² - r_inner²) * z_length
-- Returns a scalar field (not vector) for axisymmetric formulation
+- For axisymmetric 2D, only J_φ (azimuthal) component exists.
+- Current density is provided directly by `CoilGeometry.current_density` (already in A/m²);
+  no turns or transport current are inferred here.
+- Returns a scalar field (not vector) for axisymmetric formulation.
 """
-function create_current_density(coil_params::Vector{CoilParameters}, model::DiscreteModel)
+function create_current_density(coil_geometries::Vector{CoilGeometry}, model::DiscreteModel)
     # Get domain
     Ω = Triangulation(model)
     
@@ -186,7 +212,7 @@ function create_current_density(coil_params::Vector{CoilParameters}, model::Disc
         J_total = 0.0
         
         # Sum contributions from all coils
-        for coil in coil_params
+        for coil in coil_geometries
             # Check if point is inside coil
             # For axisymmetric, coil is an annulus: r_inner <= r <= r_outer
             # and z_cent - z_length/2 <= z <= z_cent + z_length/2
@@ -194,10 +220,8 @@ function create_current_density(coil_params::Vector{CoilParameters}, model::Disc
             z_high = coil.z + coil.z_length/2
             
             if (coil.r_inner <= r <= coil.r_outer) && (z_low <= z <= z_high)
-                # Compute current density: J_φ = n_turns * I / area
-                # Area of annulus: π * (r_outer² - r_inner²) * z_length
-                coil_area = π * (coil.r_outer^2 - coil.r_inner^2) * coil.z_length
-                J_total += coil.n_turns * coil.I / coil_area
+                # Current density is provided directly as design variable
+                J_total += coil.current_density
             end
         end
         
@@ -210,5 +234,57 @@ function create_current_density(coil_params::Vector{CoilParameters}, model::Disc
     return J_φ
 end
 
+"""
+    compute_coil_area(geom::CoilGeometry)
+
+Cross-sectional area of the coil pack (annulus) times axial length.
+"""
+compute_coil_area(geom::CoilGeometry) = π * (geom.r_outer^2 - geom.r_inner^2) * geom.z_length
+
+"""
+    compute_mean_circumference(geom::CoilGeometry)
+
+Mean circumference of the annulus where turns are wound.
+"""
+compute_mean_circumference(geom::CoilGeometry) = π * (geom.r_inner + geom.r_outer)
+
+"""
+    compute_ampere_turns(geom::CoilGeometry)
+
+Total ampere-turns implied by current density over the coil cross-section.
+"""
+compute_ampere_turns(geom::CoilGeometry) = geom.current_density * compute_coil_area(geom)
+
+"""
+    compute_total_current(geom::CoilGeometry)
+
+Total current if interpreted as single-turn equivalent (A) from J_φ * area.
+"""
+compute_total_current(geom::CoilGeometry) = compute_ampere_turns(geom)
+
+"""
+    compute_n_turns(geom::CoilGeometry; operating_current)
+
+Compute number of turns assuming a chosen operating current per turn.
+"""
+function compute_n_turns(geom::CoilGeometry; operating_current::Real)
+    I = float(operating_current)
+    I > 0 || error("operating_current must be positive.")
+    return compute_ampere_turns(geom) / I
+end
+
+"""
+    compute_conductor_length(geom::CoilGeometry, conductor::ConductorParameters; operating_current)
+
+Estimate total conductor length using mean circumference, winding factor, and derived turns.
+"""
+function compute_conductor_length(geom::CoilGeometry, conductor::ConductorParameters; operating_current::Real)
+    n_turns = compute_n_turns(geom; operating_current=operating_current)
+    circ = compute_mean_circumference(geom)
+    return (n_turns * circ) / conductor.winding_factor
+end
+
 # Export functions and types
-export CoilParameters, create_coil_geometry, generate_mesh, load_mesh, create_current_density
+export CoilGeometry, ConductorParameters, create_coil_geometry, generate_mesh, load_mesh,
+       create_current_density, compute_coil_area, compute_mean_circumference,
+       compute_ampere_turns, compute_total_current, compute_n_turns, compute_conductor_length

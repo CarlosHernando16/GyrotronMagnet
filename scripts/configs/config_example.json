@@ -1,0 +1,53 @@
+{
+  "target_profile": {
+    "z": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
+    "Bz": [2.0, 2.0, 1.8, 1.5, 1.2, 0.8],
+    "symmetry": false
+  },
+  "electromagnetic": {
+    "center_field": 2.0,
+    "homogeneity_ppm": 2000.0,
+    "homogeneity_window": [0.1, 0.3],
+    "decay_point": [0.4, 0.4]
+  },
+  "geometry": {
+    "bore_diameter": 0.15,
+    "magnet_height_min": 0.15,
+    "magnet_height_max": 0.25,
+    "outer_diameter": 0.5,
+    "alignment_tol": 1e-3,
+    "coil_count_min": 3,
+    "coil_count_max": 8,
+    "max_current_density": 6e7
+  },
+  "safety": {
+    "max_conductor_field": 6.0,
+    "max_radial_field": 3.0,
+    "forbid_ferromagnetics": true
+  },
+  "penalties": {
+    "field": 10.0,
+    "geometry": 50.0,
+    "safety": 100.0,
+    "conductor": 5.0
+  },
+  "bounds": {
+    "n_coils": 4,
+    "r_inner": [0.04, 0.18],
+    "r_outer": [0.06, 0.3],
+    "height": [0.02, 0.06],
+    "z_center": [-0.2, 0.4],
+    "current_density": [1e7, 6e7]
+  },
+  "optimization": {
+    "algorithm": "de",
+    "population": 25,
+    "iterations": 50,
+    "seed": 42,
+    "verbose": true
+  },
+  "mesh": {
+    "domain": [[0.0, 0.4], [-0.1, 0.6]],
+    "resolution": 0.015
+  }
+}

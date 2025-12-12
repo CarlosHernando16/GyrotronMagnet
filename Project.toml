@@ -1,9 +1,10 @@
 name = "GyrotronMagnet"
 uuid = "448fd53b-8772-5589-9e1a-0e43d311a03a"
-version = "0.1.0"
 authors = ["Carlos Hernando"]
+version = "0.1.0"
 
 [deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -15,16 +16,19 @@ GridapGmsh = "3025c34a-b394-11e9-2a55-3fee550c04c8"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Metaheuristics = "bcdb8e00-2c21-11e9-3065-2b553b22f898"
 NLopt = "76087f3c-5699-56af-9a33-bf431cd00edd"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[compat]
+ArgParse = "1.2.0"
+DrWatson = "2.19.1"
+Metaheuristics = "3.4.1"
+julia = "1.11.3"
 
 [extras]
 Test = "8dfed614-5729-5b69-8364-837407258b91"
 
 [targets]
 test = ["Test"]
-
-[compat]
-DrWatson = "2.19.1"
-julia = "1.11.3"
